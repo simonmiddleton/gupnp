@@ -60,6 +60,8 @@
 #include "gena-protocol.h"
 #include "http-headers.h"
 
+extern char *gssdp_arp_lookup (const char *);
+
 #define GUPNP_CONTEXT_DEFAULT_LANGUAGE "en"
 
 static void
@@ -116,11 +118,12 @@ typedef struct {
 } UserAgent;
 
 typedef struct {
-        char *local_path;
-        char *server_path;
-        char *default_language;
+        char         *local_path;
+        char         *server_path;
+        char         *default_language;
 
-        GList *user_agents;
+        GList        *user_agents;
+        GUPnPContext *context;
 } HostPathData;
 
 static GInitableIface* initable_parent_iface = NULL;
@@ -903,6 +906,56 @@ redirect_to_folder (SoupMessage *msg)
         g_free (uri);
 }
 
+char *
+get_address_string_from_native (SoupAddress *address)
+{
+        GSocketAddress     *sock_addr;
+        GInetSocketAddress *in_sock_addr;
+        GInetAddress       *in_addr;
+        struct sockaddr    *sa;
+        int                 len;
+        char               *ip_address;
+
+        sock_addr = soup_address_get_gsockaddr (address);
+        in_sock_addr = G_INET_SOCKET_ADDRESS (sock_addr);
+
+        in_addr = g_inet_socket_address_get_address (in_sock_addr);
+        ip_address = g_inet_address_to_string (in_addr);
+        g_object_unref (sock_addr);
+
+        return ip_address;
+}
+
+static void
+update_client_cache (GUPnPContext *context,
+                     SoupAddress  *address,
+                     const char   *user_agent)
+{
+        const char *entry;
+        GSSDPClient *client;
+        char *ip_address = NULL;
+
+        if (user_agent == NULL)
+                return;
+
+        client = GSSDP_CLIENT (context);
+
+
+        /* Don't manually resolve the SoupAddress here, it might block
+         * or cause DNS requests we don't want */
+        if (!soup_address_is_resolved (address))
+                ip_address = get_address_string_from_native (address);
+        else
+                ip_address = g_strdup (soup_address_get_physical (address));
+
+        entry = gssdp_client_guess_user_agent (client, ip_address);
+        if (!entry) {
+                gssdp_client_add_cache_entry (client,
+                                              ip_address,
+                                              user_agent);
+        }
+}
+
 /* Serve @path. Note that we do not need to check for path including bogus
  * '..' as libsoup does this for us. */
 static void
@@ -948,6 +1001,9 @@ host_path_handler (G_GNUC_UNUSED SoupServer        *server,
 
         user_agent = soup_message_headers_get_one (msg->request_headers,
                                                    "User-Agent");
+        update_client_cache (host_path_data->context,
+                             soup_client_context_get_address (client),
+                             user_agent);
 
         /* Construct base local path */
         local_path = construct_local_path (path, user_agent, host_path_data);
@@ -1161,7 +1217,8 @@ user_agent_free (UserAgent *agent)
 static HostPathData *
 host_path_data_new (const char *local_path,
                     const char *server_path,
-                    const char *default_language)
+                    const char *default_language,
+                    GUPnPContext *context)
 {
         HostPathData *path_data;
 
@@ -1170,6 +1227,7 @@ host_path_data_new (const char *local_path,
         path_data->local_path  = g_strdup (local_path);
         path_data->server_path = g_strdup (server_path);
         path_data->default_language = g_strdup (default_language);
+        path_data->context = context;
 
         return path_data;
 }
@@ -1213,7 +1271,8 @@ gupnp_context_host_path (GUPnPContext *context,
 
         path_data = host_path_data_new (local_path,
                                         server_path,
-                                        context->priv->default_language);
+                                        context->priv->default_language,
+                                        context);
 
         soup_server_add_handler (server,
                                  server_path,
