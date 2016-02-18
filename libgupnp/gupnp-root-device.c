@@ -423,6 +423,18 @@ gupnp_root_device_constructor (GType                  type,
         /* Generate full location */
         uri = _gupnp_context_get_server_uri (context);
         soup_uri_set_path (uri, relative_location);
+        {
+                GInetAddress *addr = g_inet_address_new_from_string (soup_uri_get_host (uri));
+                if (g_inet_address_get_family (addr) == G_SOCKET_FAMILY_IPV6 &&
+                    g_inet_address_get_is_link_local (addr)) {
+                        char *new_host = g_strdup_printf ("%s%%%d",
+                                        soup_uri_get_host (uri),
+                                        gssdp_client_get_index (GSSDP_CLIENT (context)));
+                        soup_uri_set_host (uri, new_host);
+                        g_free (new_host);
+                }
+                g_object_unref (addr);
+        }
         location = soup_uri_to_string (uri, FALSE);
         soup_uri_free (uri);
 

@@ -576,9 +576,8 @@ gupnp_context_get_server (GUPnPContext *context)
         g_return_val_if_fail (GUPNP_IS_CONTEXT (context), NULL);
 
         if (context->priv->server == NULL) {
-                const char *ip = NULL;
-                guint port = 0;
-                GSocketAddress *addr = NULL;
+                GSocketAddress *addr;
+                GInetAddress *inet_addr;
                 GError *error = NULL;
 
                 context->priv->server = soup_server_new (NULL, NULL);
@@ -589,13 +588,26 @@ gupnp_context_get_server (GUPnPContext *context)
                                          context,
                                          NULL);
 
-                ip = gssdp_client_get_host_ip (GSSDP_CLIENT (context));
-                port = context->priv->port;
-                addr = g_inet_socket_address_new_from_string (ip, port);
+                inet_addr = gssdp_client_get_address (GSSDP_CLIENT (context));
+                if (g_inet_address_get_family (inet_addr) == G_SOCKET_FAMILY_IPV6 &&
+                    g_inet_address_get_is_link_local (inet_addr)) {
+                        guint scope;
+
+                        scope = gssdp_client_get_index (GSSDP_CLIENT (context));
+                        addr = g_object_new (G_TYPE_INET_SOCKET_ADDRESS,
+                                             "address", inet_addr,
+                                             "port", context->priv->port,
+                                             "scope-id", scope,
+                                             NULL);
+                } else {
+                        addr = g_inet_socket_address_new (inet_addr,
+                                                          context->priv->port);
+                }
+                g_object_unref (inet_addr);
 
                 if (! soup_server_listen (context->priv->server,
                                           addr, (SoupServerListenOptions) 0, &error)) {
-                        g_warning ("GUPnPContext: Unable to listen on %s:%u %s", ip, port, error->message);
+                        g_warning ("GUPnPContext: Unable to listen on %s:%u %s", "", 0,  error->message);
                         g_error_free (error);
                 }
 
@@ -617,6 +629,7 @@ make_server_uri (GUPnPContext *context)
         {
                 SoupURI *uri = soup_uri_copy (uris->data);
                 g_slist_free_full (uris, (GDestroyNotify) soup_uri_free);
+
                 return uri;
         }
         return NULL;
