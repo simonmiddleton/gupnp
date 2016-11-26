@@ -202,6 +202,7 @@ struct _GUPnPServiceAction {
         char         *name;
 
         SoupMessage  *msg;
+        SoupClientContext *client;
         gboolean      accept_gzip;
 
         GUPnPXMLDoc  *doc;
@@ -806,6 +807,22 @@ gupnp_service_action_get_message (GUPnPServiceAction *action)
         return g_object_ref (action->msg);
 }
 
+/**
+ * gupnp_service_action_get_client_context:
+ * @action: A #GUPnPServiceAction
+ *
+ * Get the #SoupClientContext associated with @action. The value will
+ * be NULL except for when in the context of the control handler.
+ *
+ * Return value: (transfer none): #SoupClientContext associated with
+ * @action.
+ **/
+SoupClientContext *
+gupnp_service_action_get_client_context (GUPnPServiceAction *action)
+{
+        return action->client;
+}
+
 static void
 gupnp_service_init (GUPnPService *service)
 {
@@ -910,7 +927,7 @@ control_server_handler (SoupServer                      *server,
                         SoupMessage                     *msg,
                         G_GNUC_UNUSED const char        *server_path,
                         G_GNUC_UNUSED GHashTable        *query,
-                        G_GNUC_UNUSED SoupClientContext *soup_client,
+                        SoupClientContext               *soup_client,
                         gpointer                         user_data)
 {
         GUPnPService *service;
@@ -997,6 +1014,7 @@ control_server_handler (SoupServer                      *server,
         action->ref_count      = 1;
         action->name           = g_strdup (action_name);
         action->msg            = g_object_ref (msg);
+        action->client         = soup_client;
         action->doc            = gupnp_xml_doc_new(doc);
         action->node           = action_node;
         action->response_str   = new_action_response_str (action_name,
@@ -1029,6 +1047,8 @@ control_server_handler (SoupServer                      *server,
         /* Tell soup server that response is not ready yet */
         soup_server_pause_message (server, msg);
 
+        gupnp_service_action_ref (action);
+
         /* QueryStateVariable? */
         if (strcmp (action_name, "QueryStateVariable") == 0)
                 query_state_variable (service, action);
@@ -1053,6 +1073,9 @@ control_server_handler (SoupServer                      *server,
                                                            "Invalid Action");
                 }
         }
+
+        action->client = NULL;
+        gupnp_service_action_unref (action);
 }
 
 /* Generates a standard (re)subscription response */

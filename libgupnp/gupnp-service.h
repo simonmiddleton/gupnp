@@ -161,6 +161,10 @@ gupnp_service_action_return_error (GUPnPServiceAction *action,
 SoupMessage *
 gupnp_service_action_get_message  (GUPnPServiceAction *action);
 
+SoupClientContext *
+gupnp_service_action_get_client_context
+                                  (GUPnPServiceAction *action);
+
 guint
 gupnp_service_action_get_argument_count
                                   (GUPnPServiceAction *action);
